@@ -54,28 +54,6 @@ Flags stale documents and marks critical specialties for immediate KB refresh.
 
 ---
 
-## Architecture
-
-```
-healthcare-rag-monitor/
-├── monitor/
-│   ├── models.py               Data models for queries, responses, alerts
-│   ├── retrieval_checker.py    Measures retrieval relevance and quality
-│   ├── faithfulness_checker.py Detects hallucinations and ungrounded claims
-│   ├── freshness_checker.py    Checks clinical guideline publication dates
-│   └── engine.py               Core monitor that runs all three checks
-├── alerts/
-│   └── audit_logger.py         SQLite audit trail for compliance logging
-├── rag/
-│   └── pipeline.py             Simulated clinical RAG pipeline with knowledge base
-├── dashboard/
-│   └── api.py                  FastAPI monitoring and audit API
-├── main.py                     CLI entry point
-└── config.py                   Environment configuration
-```
-
----
-
 ## Setup
 
 **Prerequisites**
