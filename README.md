@@ -1,95 +1,129 @@
-# Clinical RAG Monitor
+# Healthcare RAG Monitor
 
-Hospitals are using AI to help doctors make faster clinical decisions.
-A doctor asks a question, the system pulls relevant medical guidelines,
-and generates an answer. The problem is nobody is watching whether those
-answers are actually safe to act on.
-
-This project monitors every AI response in a clinical decision support
-system and catches three specific problems before the answer reaches
-a doctor.
-
-One, the AI is making up medical facts that were never in the source
-documents it retrieved. Two, the guidelines being used to generate the
-answer are outdated and have been superseded by newer recommendations.
-Three, the wrong documents are being retrieved for the question being
-asked, so the answer is built on irrelevant context.
-
-None of these failures throw an error. The system keeps running and
-doctors keep trusting it. This monitor catches them.
+A clinical RAG pipeline monitoring system for hospital clinical decision support.
+Detects hallucinations, outdated clinical guidelines, and retrieval quality drift
+before AI-generated answers reach doctors. Produces a full compliance audit trail
+for every query.
 
 ---
 
-## What Gets Checked on Every Query
+## The Problem
 
-**Retrieval Quality**
-Checks whether the documents pulled from the knowledge base actually
-match the clinical question being asked. Scores keyword overlap and
-document relevance. Flags responses where the retrieved context is
-likely off-topic.
+Small hospitals and clinics are deploying RAG systems to help doctors make clinical
+decisions faster. A doctor asks the system a question, it retrieves relevant clinical
+guidelines, and generates an answer.
 
-**Hallucination Detection**
-Scans the generated answer for medical claims like drug dosages,
-treatment recommendations, and clinical targets. Checks whether each
-claim can be traced back to the retrieved source documents. Flags
-anything the AI added that was not in the sources.
+The problem is these systems degrade silently in three ways.
 
-**Guideline Freshness**
-Checks the publication and update dates of every retrieved document.
-Different medical specialties have different freshness thresholds.
-Oncology guidelines expire in 180 days. Infectious disease in 90 days.
-General medicine in 730 days. Stale documents trigger an immediate
-alert and a knowledge base refresh recommendation.
+First, medical guidelines change. The ADA, CDC, and professional bodies update
+treatment recommendations regularly. If your knowledge base is not current, doctors
+get answers based on outdated guidelines. In medicine that can directly harm patients.
+
+Second, the LLM starts hallucinating medical facts that were never in the retrieved
+documents. The answer sounds confident and plausible but it is not grounded in any
+source. A doctor acts on it. That is a patient safety incident.
+
+Third, the retrieval drifts. The system starts pulling the wrong documents for a
+given query and nobody notices because the answers still look reasonable.
+
+None of these failures throw an error. The system keeps running. Doctors keep trusting
+it. That is the danger.
+
+---
+
+## What This Monitors
+
+Every RAG response goes through three checks before it is logged as safe or flagged.
+
+**Retrieval Quality Check**
+Measures whether the documents retrieved actually match the clinical query.
+Uses keyword overlap and vector similarity scores. Flags responses where
+the retrieved context is likely irrelevant to the question asked.
+
+**Faithfulness Check**
+Detects whether the generated answer is grounded in the retrieved documents
+or whether the model is introducing facts not found in the sources.
+Scans for medical claims like dosages, drug names, and treatment recommendations
+and checks whether each claim can be traced back to the retrieved context.
+
+**Guideline Freshness Check**
+Checks the publication and update dates of every retrieved document against
+specialty-specific freshness thresholds. Oncology guidelines have a 180 day
+threshold. Infectious disease has 90 days. General medicine has 730 days.
+Flags stale documents and marks critical specialties for immediate KB refresh.
+
+---
+
+## Architecture
+
+```
+healthcare-rag-monitor/
+├── monitor/
+│   ├── models.py               Data models for queries, responses, alerts
+│   ├── retrieval_checker.py    Measures retrieval relevance and quality
+│   ├── faithfulness_checker.py Detects hallucinations and ungrounded claims
+│   ├── freshness_checker.py    Checks clinical guideline publication dates
+│   └── engine.py               Core monitor that runs all three checks
+├── alerts/
+│   └── audit_logger.py         SQLite audit trail for compliance logging
+├── rag/
+│   └── pipeline.py             Simulated clinical RAG pipeline with knowledge base
+├── dashboard/
+│   └── api.py                  FastAPI monitoring and audit API
+├── main.py                     CLI entry point
+└── config.py                   Environment configuration
+```
 
 ---
 
 ## Setup
 
-You need Python 3.11 or higher and an Anthropic API key.
+**Prerequisites**
+- Python 3.11+
+- Anthropic API key
+
+**Installation**
+
 ```bash
-git clone https://github.com/yourusername/clinical-rag-monitor
-cd clinical-rag-monitor
+git clone https://github.com/yourusername/healthcare-rag-monitor
+cd healthcare-rag-monitor
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open the `.env` file and add your Anthropic API key.
-```
-ANTHROPIC_API_KEY=your_key_here
-```
+Add your Anthropic API key to `.env`.
 
 ---
 
 ## Running It
 
-**See the monitor in action without any API calls**
+**Demo mode, no API calls**
 ```bash
 python main.py demo
 ```
-Runs three real clinical queries through all three checks. Shows
-monitoring scores, clinical alerts, and a knowledge base health
-report. No API key needed to run this.
+Runs three clinical queries through the monitor using simulated responses.
+Shows monitoring scores, alerts, and the KB health report. No API key needed.
 
 **Run a real clinical query through the full pipeline**
 ```bash
-python main.py run --query "First-line treatment for sepsis?" --specialty infectious_disease
+python main.py run --query "What is the first-line treatment for T2 diabetes with CKD?" --specialty endocrinology
 ```
 
-**Check which guidelines in the knowledge base are outdated**
+**View the safety report**
 ```bash
-python main.py kb-health
+python main.py report
 ```
 
-**See all active clinical alerts that need attention**
+**View active clinical alerts**
 ```bash
 python main.py alerts
 ```
 
-**View the overall safety report**
+**Check knowledge base freshness**
 ```bash
-python main.py report
+python main.py kb-health
 ```
 
 **Start the monitoring dashboard**
@@ -104,38 +138,36 @@ Opens at http://localhost:8000. Full API docs at http://localhost:8000/docs.
 
 | Method | Endpoint | What it does |
 |---|---|---|
-| GET | /safety/summary | Overall pass rates and safety scores |
+| GET | /safety/summary | Overall safety scores and pass rates |
 | GET | /alerts/active | All unresolved clinical alerts |
 | POST | /alerts/{id}/resolve | Mark an alert as resolved |
 | GET | /results/recent | Recent monitoring results |
 | GET | /kb/health | Knowledge base freshness report |
-| GET | /kb/documents | All documents with version and date info |
+| GET | /kb/documents | List all documents with metadata |
 
 ---
 
-## Alert Types
+## Clinical Alert Types
 
-| Alert | When it fires | What to do |
+| Alert | Severity | Action |
 |---|---|---|
-| hallucination_detected | AI answer contains ungrounded medical claims | Do not act on response. Escalate to senior clinician. |
-| outdated_guideline | Retrieved document is past its freshness threshold | Refresh knowledge base. Flag the specialty. |
-| low_retrieval_quality | Retrieved documents do not match the query | Review documents manually before acting. |
+| hallucination_detected | High to Critical | Escalate to senior clinician. Do not act on response. |
+| outdated_guideline | Medium to Critical | Refresh knowledge base. Flag specialty for review. |
+| low_retrieval_quality | Low to High | Review retrieved documents manually. |
 
 ---
 
 ## Why This Matters for Hospitals
 
-Joint Commission and CMS standards require hospitals to document the
-basis for every clinical decision support recommendation. If a doctor
-acts on an AI answer that was built on a 2014 guideline that was
-superseded in 2022, the hospital has a liability problem.
+Joint Commission and CMS standards require hospitals to document the basis for
+clinical decision support recommendations. If a doctor acts on a RAG answer
+based on a 2014 guideline superseded in 2022, the hospital has a liability problem.
 
-This system writes a structured audit record for every single query.
-It logs which guideline versions were used, what the retrieval quality
-was, whether the answer was flagged before reaching the doctor, and
-who reviewed and resolved each alert. That is not just an engineering
-feature. It is a compliance feature that hospital risk management teams
-actually need.
+This system produces a structured audit trail for every single query showing
+which guideline versions were used, what the retrieval quality was, whether
+the answer was flagged before reaching the doctor, and who resolved the alert.
+That is not just an engineering feature. It is a compliance feature that
+hospital administrators and risk management teams need.
 
 ---
 
@@ -147,8 +179,6 @@ Python 3.11, Anthropic Claude API, FastAPI, Pydantic v2, SQLite, Uvicorn
 
 ## Contributing
 
-Good areas to contribute: connecting to real vector databases like
-Pinecone or Weaviate, building an LLM-based faithfulness judge to
-replace the heuristic approach, automated knowledge base refresh when
-stale documents are detected, and HL7 FHIR compatibility for EHR
-integration.
+Priority areas: integration with real vector databases like Pinecone or Weaviate,
+LLM-based faithfulness judge to replace the heuristic checker, automated KB refresh
+pipeline when stale documents are detected, and HL7 FHIR compatibility for EHR integration.
